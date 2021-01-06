@@ -142,6 +142,7 @@ The following are common files and directories found in a Bolt project.
 |---------|-----------|
 |[`bolt-project.yaml`](bolt_project_reference.md)|Contains configuration options for Bolt and  Bolt projects. This file must exist for Bolt to find any of the other files or directories in this list.|
 |[`inventory.yaml`](inventory_file_v2.md)|Contains a list of known targets and target specific data.|
+|[`puppet_connect_data.yaml`](supported_plugins.md#puppet_connect_data)|Contains key-value data for the `puppet_connect_data` plugin (optional)|
 |[`plans/`](plans.md)|A directory for storing your plans.|
 |[`tasks/`](tasks.md)|A directory for storing your tasks.|
 |`files/`|A directory for storing content consumed by your tasks and plans, such as scripts.|

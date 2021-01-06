@@ -18,6 +18,7 @@ files, and plans.
 | `pkcs7` | Decrypt ciphertext. | [pkcs7](https://forge.puppet.com/puppetlabs/pkcs7) |
 | `prompt` | Prompt the user for a sensitive value. | [prompt](#prompt) |
 | `puppetdb` | Query PuppetDB for a group of targets. | [puppetdb](#puppetdb) |
+| `puppet_connect_data` | Pass target connection data over to Puppet Connect | [puppet_connect_data](#puppet_connect_data)
 | `task` | Run a task as a plugin. | [task](#task) |
 | `terraform` | Generate targets from local and remote Terraform state files. | [terraform](https://forge.puppet.com/puppetlabs/terraform) |
 | `vault` | Access secrets from a Key/Value engine on a Hashicorp Vault server. | [vault](https://forge.puppet.com/puppetlabs/vault) |
@@ -209,3 +210,152 @@ config:
       parameters:
         key: ssh_password
 ```
+
+### `puppet_connect_data`
+
+The `puppet_connect_data` plugin lets you pass-in target connection
+information as key-value data to Puppet Connect. You can use it to
+specify auto-loaded SSH config (e.g. users and private keys) or secrets
+(e.g. WinRM passwords).
+
+Puppet Connect securely stores your target connection information in a
+Postgres database. All secrets are stored in encrypted format. See
+the [stored connection data](#stored-connection-data) section for more
+details.
+
+**Note:** Only the SSH and WinRM transports are supported in Puppet
+Connect. Also, this is an _experimental_ feature.
+
+#### Parameters
+
+The following parameter is available to the `puppet_connect_data` plugin:
+
+| Parameter | Description | Type | Default |
+| --- | --- | --- | --- |
+| `key` | **Required.** The key that contains the value. If the key is not specified in the data, then its value is resolved to `nil`. A `nil`-resolved value is equivalent to not specified _if_ the resolved value represents a transport's config. See the examples below for more clarification. | `String` | None |
+
+#### Example usage
+
+```yaml
+targets:
+  - target1.example.com
+    config:
+      ssh:
+        user:
+          _plugin: puppet_connect_data
+          key: ssh_user
+        password:
+          _plugin: puppet_connect_data
+          key: ssh_password
+```
+
+Here, if the specified data is `{"ssh_user": "foo_user", "ssh_password": "foo_password"}`, then
+the `user` and `password` keys are resolved to `foo_user` and `foo_password`.
+Conversely, if the specified data is `{}`, then the `user` and `password`
+keys are resolved to `nil`. Since the `user` and `password` keys are part of
+the SSH transport's config, Bolt will delete these keys from the parsed config.
+Thus when data is `{}`, the above example will be parsed as
+
+```yaml
+targets:
+  - target1.example.com
+    config:
+      ssh: {}
+```
+
+> If you run Bolt on a target with the above config, then Bolt will auto-load
+the target's SSH config (default behavior).
+
+#### puppet_connect_data.yaml
+
+If a `puppet_connect_data.yaml` file exists in your project root, then the
+`puppet_connect_data` plugin will parse its data from this file. Below is an
+example of a valid `puppet_connect_data.yaml` file:
+
+```yaml
+ssh_user: foo_user
+ssh_password: foo_password
+```
+
+Here, the parsed data is `{"ssh_user": "foo_user", "ssh_password": "foo_password"}`.
+
+In the above example, `ssh_password` is specified as plain-text. For better security,
+you can specify plugin-reference values for your keys. Take a look at the following
+example:
+
+```yaml
+ssh_user: foo_user
+ssh_password:
+  _plugin: env_var
+  var: SSH_PASSWORD
+```
+
+Here, the `ssh_password` is resolved by the `env_var` plugin.
+
+**Note:** As of this writing, `puppet_connect_data` does _not_ cache resolved plugin
+reference values. Thus, given a key that resolves to a plugin reference, if that same
+key's referenced multiple times in the inventory file, then the plugin reference is
+re-evaluated each time. For example, given the above `puppet_connect_data.yaml` file,
+an inventory like:
+
+```
+targets:
+  - target1.example.com
+    config:
+      ssh:
+        user:
+          _plugin: puppet_connect_data
+          key: ssh_user
+        password:
+          _plugin: puppet_connect_data
+          key: ssh_password
+  - target2.example.com
+    config:
+      ssh:
+        user:
+          _plugin: puppet_connect_data
+          key: ssh_user
+        password:
+          _plugin: puppet_connect_data
+          key: ssh_password
+```
+
+will result in the `ssh_password` reference being evaluated _twice_ (once for
+the first target and once for the second).
+
+We plan on adding caching support in a later iteration of the plugin. Please
+file an issue if you'd like us to expedite this process.
+
+**Note:** You do not have to specify auto-loaded, `puppet_connect_data`-referenced
+SSH config in your `puppet_connect_data.yaml` file. The `puppet_connect_data` plugin
+resolves all unspecified keys to `nil`, which tells Bolt to remove the corresponding
+config keys from the target's transport config (meaning SSH config will be auto-loaded
+if that was the previous, pre-`puppet_connect_data` plugin behavior).
+
+#### Stored connection data
+
+The table below documents the target connection data stored by Puppet Connect.
+Secrets are bolded.
+
+##### SSH
+
+* user
+* port
+* connect-timeout
+* run-as
+* tmpdir
+* tty
+* hostname
+* **password**
+* **private-key.key-data**
+* **sudo-password**
+
+##### WinRM
+
+* user
+* port
+* connect-timeout
+* tmpdir
+* extensions
+* hostname
+* **password**
