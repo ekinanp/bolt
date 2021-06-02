@@ -21,6 +21,11 @@ require 'puppet'
 # Needed by the `/project_file_metadatas` endpoint
 require 'puppet/file_serving/fileset'
 
+# Needed by the 'project_facts_plugin_tarball' endpoint
+require 'minitar'
+require 'zlib'
+
+
 module BoltServer
   class TransportApp < Sinatra::Base
     # This disables Sinatra's error page generation
@@ -672,6 +677,51 @@ module BoltServer
         end
 
         [200, target_list.to_json]
+      end
+    end
+
+    # Returns the base64 encoded tar archive of plugin code that is needed to calculate
+    # custom facts
+    #
+    # @param versioned_project [String] the versioned_project to build the plugin tarball from
+    post '/project_facts_plugin_tarball' do
+      raise BoltServer::RequestError, "'versioned_project' is a required argument" if params['versioned_project'].nil?
+      content_type :json
+      in_bolt_project(params['versioned_project']) do |context|
+        # Inspired by Bolt::Applicator.build_plugin_tarball
+        sio = StringIO.new
+
+        begin
+          output = Minitar::Output.new(Zlib::GzipWriter.new(sio))
+
+          # TODO: Should this be full_modulepath
+          plugin_modulepath = context[:pal].user_modulepath
+          Puppet.lookup(:current_environment).override_with(modulepath: plugin_modulepath).modules.each do |mod|
+            search_dirs = []
+            search_dirs << mod.plugins if mod.plugins?
+            search_dirs << mod.pluginfacts if mod.pluginfacts?
+
+            files = Find.find(*search_dirs).select { |file| File.file?(file) }
+
+            parent = Pathname.new(mod.path).parent
+            files.each do |file|
+              tar_path = Pathname.new(file).relative_path_from(parent)
+              stat = File.stat(file)
+              content = File.binread(file)
+              output.tar.add_file_simple(
+                tar_path.to_s,
+                data: content,
+                size: content.size,
+                mode: stat.mode & 0o777,
+                mtime: stat.mtime
+              )
+            end
+          end
+        ensure
+          output.close
+        end
+
+        [200, Base64.encode64(sio.string).to_json]
       end
     end
 
